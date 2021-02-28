@@ -1,0 +1,2 @@
+#!/usr/bin/with-contenv bash
+dnsmasq --hostsdir=${HOSTS_DIR} --no-daemon
