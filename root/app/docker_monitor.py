@@ -5,6 +5,7 @@ import os
 
 thisImage = 'bfincher/dynamic-dns'
 
+
 class Container:
     def __init__(self, id, virtualAlias, hostName, virtualHost, virtualPort):
         self.id = id
@@ -24,6 +25,7 @@ class Container:
 
     @classmethod
     def fromConfig(cls, containerConfig):
+        defaultVirtualAlias = os.environ.get('DEFAULT_VIRTUAL_ALIAS')
         for tag in containerConfig.image.tags:
             if tag == thisImage:
                 return None
@@ -48,7 +50,10 @@ class Container:
                 virtualAlias = envVar.partition('=')[2]
 
         if not virtualAlias:
-            return
+            if defaultVirtualAlias:
+                virtualAlias = defaultVirtualAlias
+            else:
+                return
 
         if not virtualHost:
             return
@@ -70,6 +75,7 @@ class Container:
         else:
             return None
 
+
 class DynamicDns:
     stopEventNames = ['kill', 'die', 'destroy', 'stop']
 
@@ -89,8 +95,6 @@ class DynamicDns:
 
         self.genHostsFile()
 
-
-
     def genHostsFile(self):
         hostsDir = os.environ['HOSTS_DIR']
         print("Generating new hosts file")
@@ -101,9 +105,6 @@ class DynamicDns:
 
     def processEvents(self):
         for event in self.client.events(decode=True):
-            #if event.get('id') not in self.containers:
-            #    continue
-
             status = event.get('status')
             if status:
                 if status == 'start':
@@ -119,7 +120,7 @@ class DynamicDns:
         if self.containers.pop(id, None):
             print("Generating new config due to removal of container %s" % id)
             self.genHostsFile()
-            
+
     def processStartEvent(self, event):
         id = event.get('id')
         containerConfig = self.client.containers.get(id)
@@ -139,7 +140,6 @@ class DynamicDns:
                 self.genHostsFile()
 
             print("%s started.  Image name = %s" % (container, containerConfig.image))
-
 
 
 if __name__ == '__main__':
