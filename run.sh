@@ -6,4 +6,6 @@ docker run -d \
 --name dynamic-dns \
 --network frontend \
 --restart unless-stopped \
+--log-opt max-size=10m \
+--log-opt max-file=5 \
 bfincher/dynamic-dns

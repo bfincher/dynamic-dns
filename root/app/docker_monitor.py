@@ -6,8 +6,9 @@ import os
 thisImage = 'bfincher/dynamic-dns'
 
 class Container:
-    def __init__(self, id, hostName, virtualHost, virtualPort):
+    def __init__(self, id, virtualAlias, hostName, virtualHost, virtualPort):
         self.id = id
+        self.virtualAlias = virtualAlias
         self.hostName = hostName
         self.virtualHost = virtualHost
         self.virtualPort = virtualPort
@@ -36,12 +37,18 @@ class Container:
         envVars = config['Env']
         virtualHost = None
         virtualPort = None
+        virtualAlias = None
 
         for envVar in envVars:
             if envVar.startswith('VIRTUAL_HOST'):
                 virtualHost = envVar.partition('=')[2]
             elif envVar.startswith('VIRTUAL_PORT'):
                 virtualPort = envVar.partition('=')[2]
+            elif envVar.startswith('VIRTUAL_ALIAS'):
+                virtualAlias = envVar.partition('=')[2]
+
+        if not virtualAlias:
+            return
 
         if not virtualHost:
             return
@@ -55,7 +62,11 @@ class Container:
                     break
 
         if virtualPort:
-            return Container(containerConfig.id, config['Hostname'], virtualHost, virtualPort)
+            networks = attrs.get('NetworkSettings').get('Networks')
+            for key in networks.keys():
+                ipAddr = attrs.get('NetworkSettings').get('Networks').get(key).get('IPAddress')
+                break
+            return Container(containerConfig.id, virtualAlias, config['Hostname'], virtualHost, virtualPort)
         else:
             return None
 
@@ -86,7 +97,7 @@ class DynamicDns:
 
         with open(os.path.join(hostsDir, 'hosts'), 'w') as f:
             for container in self.containers.values():
-                f.write("%s\t%s\n" % (container.hostName, container.virtualHost))
+                f.write("%s\t%s\n" % (container.virtualAlias, container.virtualHost))
 
     def processEvents(self):
         for event in self.client.events(decode=True):
