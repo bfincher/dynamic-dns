@@ -1,3 +1,4 @@
 #!/usr/bin/with-contenv bash
+export PYTHONUNBUFFERED=1
 cd /app
 python3 docker_monitor.py

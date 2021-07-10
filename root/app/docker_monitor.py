@@ -56,6 +56,7 @@ class Container:
                 return
 
         if not virtualHost:
+            print("Container %s has no virtual host" % containerConfig.id)
             return
 
         if not virtualPort:
@@ -112,8 +113,6 @@ class DynamicDns:
                 elif status in DynamicDns.stopEventNames:
                     self.processStopEvent(event)
 
-                if not status.startswith('exec'):
-                    print(event)
 
     def processStopEvent(self, event):
         id = event.get('id')
