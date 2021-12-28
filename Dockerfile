@@ -1,4 +1,4 @@
-from bfincher/alpine-python3:3.13 
+from bfincher/alpine-python3:3.15 
 
 env PYTHONBUFFERED 1
 
