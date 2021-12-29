@@ -1,80 +1,90 @@
 #!/usr/bin/python3
 
-import docker
 import os
+import docker
 
 thisImage = 'bfincher/dynamic-dns'
 
 
 class Container:
-    def __init__(self, id, virtualAlias, hostName, virtualHost, virtualPort):
-        self.id = id
+    def __init__(self, containerId, virtualAlias, hostName, virtualHost, virtualPort): #pylint: disable=too-many-arguments
+        self.containerId = containerId
         self.virtualAlias = virtualAlias
         self.hostName = hostName
         self.virtualHost = virtualHost
         self.virtualPort = virtualPort
 
     def __eq__(self, obj):
-        return self.id == obj.id
+        return self.containerId == obj.containerId
 
     def __str__(self):
-        return "id = " + self.id[:10]
+        return "containerId = " + self.containerId[:10]
 
     def __unicode__(self):
         return self.__str__()
 
     @classmethod
     def fromConfig(cls, containerConfig):
-        defaultVirtualAlias = os.environ.get('DEFAULT_VIRTUAL_ALIAS')
         for tag in containerConfig.image.tags:
             if tag == thisImage:
                 return None
 
-        attrs = containerConfig.attrs
         status = containerConfig.status
-        if status != 'running' and status != 'paused':
+        if status not in ['running', 'paused']:
             return None
 
         config = containerConfig.attrs['Config']
         envVars = config['Env']
-        virtualHost = None
-        virtualPort = None
-        virtualAlias = None
-
-        for envVar in envVars:
-            if envVar.startswith('VIRTUAL_HOST'):
-                virtualHost = envVar.partition('=')[2]
-            elif envVar.startswith('VIRTUAL_PORT'):
-                virtualPort = envVar.partition('=')[2]
-            elif envVar.startswith('VIRTUAL_ALIAS'):
-                virtualAlias = envVar.partition('=')[2]
+        virtualHost = _getVirtualHost(envVars)
+        virtualPort = _getVirtualPort(envVars, containerConfig)
+        virtualAlias = _getVirtualAlias(envVars)
 
         if not virtualAlias:
-            if defaultVirtualAlias:
-                virtualAlias = defaultVirtualAlias
-            else:
-                return
+            print(f"Container {containerConfig.id} has no virtual alias")
+            return None
 
         if not virtualHost:
-            print("Container %s has no virtual host" % containerConfig.id)
-            return
+            print(f"Container {containerConfig.id} has no virtual host")
+            return None
 
         if not virtualPort:
-            portBindings = containerConfig.ports
-            for key in portBindings.keys():
-                value = portBindings[key]
-                if value and key.endswith('tcp'):
-                    virtualPort = value[0]['HostPort']
-                    break
-
-        if virtualPort:
-            networks = attrs.get('NetworkSettings').get('Networks')
-            for key in networks.keys():
-                ipAddr = attrs.get('NetworkSettings').get('Networks').get(key).get('IPAddress')
-                break
-            return Container(containerConfig.id, virtualAlias, config['Hostname'], virtualHost, virtualPort)
-        else:
+            print(f"Container {containerConfig.id} has no virtual port")
             return None
+
+        return Container(containerConfig.id, virtualAlias, config['Hostname'], virtualHost, virtualPort)
+
+
+def _getVirtualHost(envVars):
+    for envVar in envVars:
+        if envVar.startswith('VIRTUAL_HOST'):
+            return envVar.partition('=')[2]
+
+    return None
+
+def _getVirtualPort(envVars, containerConfig):
+    for envVar in envVars:
+        if envVar.startswith('VIRTUAL_PORT'):
+            return envVar.partition('=')[2]
+
+    # if not in env var, look in port bindings
+    portBindings = containerConfig.ports
+    for key in portBindings.keys():
+        value = portBindings[key]
+        if value and isinstance(key, str) and key.endswith('tcp'):
+            return value[0]['HostPort']
+
+    return None
+
+def _getVirtualAlias(envVars):
+    for envVar in envVars:
+        if envVar.startswith('VIRTUAL_ALIAS'):
+            return envVar.partition('=')[2]
+
+    defaultVirtualAlias = os.environ.get('DEFAULT_VIRTUAL_ALIAS')
+    if defaultVirtualAlias:
+        return defaultVirtualAlias
+
+    return None
 
 
 class DynamicDns:
@@ -89,10 +99,10 @@ class DynamicDns:
         for containerConfig in containersList.list():
             container = Container.fromConfig(containerConfig)
             if container:
-                self.containers[container.id] = container
+                self.containers[container.containerId] = container
 
-        for key in self.containers:
-            print('%s -> %s' % (key, self.containers[key]))
+        for key, value in self.containers.items():
+            print(f'{key} -> {value}')
 
         self.genHostsFile()
 
@@ -100,9 +110,9 @@ class DynamicDns:
         hostsDir = os.environ['HOSTS_DIR']
         print("Generating new hosts file")
 
-        with open(os.path.join(hostsDir, 'hosts'), 'w') as f:
+        with open(os.path.join(hostsDir, 'hosts'), 'w', encoding='utf8') as f:
             for container in self.containers.values():
-                f.write("%s\t%s\n" % (container.virtualAlias, container.virtualHost))
+                f.write(f"{container.virtualAlias}\t{container.virtualHost}\n")
 
     def processEvents(self):
         for event in self.client.events(decode=True):
@@ -115,20 +125,20 @@ class DynamicDns:
 
 
     def processStopEvent(self, event):
-        id = event.get('id')
-        if self.containers.pop(id, None):
-            print("Generating new config due to removal of container %s" % id)
+        containerId = event.get('id')
+        if self.containers.pop(containerId, None):
+            print(f"Generating new config due to removal of container {containerId}")
             self.genHostsFile()
 
     def processStartEvent(self, event):
-        id = event.get('id')
-        containerConfig = self.client.containers.get(id)
+        containerId = event.get('id')
+        containerConfig = self.client.containers.get(containerId)
         container = Container.fromConfig(containerConfig)
         if container:
             genNewConfig = False
-            oldContainer = self.containers.get(id)
-            self.containers[id] = container
-            print('adding %s to containers' % id)
+            oldContainer = self.containers.get(containerId)
+            self.containers[containerId] = container
+            print(f'adding {containerId} to containers')
             if oldContainer:
                 if oldContainer != container:
                     genNewConfig = True
@@ -138,7 +148,7 @@ class DynamicDns:
             if genNewConfig:
                 self.genHostsFile()
 
-            print("%s started.  Image name = %s" % (container, containerConfig.image))
+            print(f"{container} started.  Image name = {containerConfig.image}")
 
 
 if __name__ == '__main__':
