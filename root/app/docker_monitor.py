@@ -1,13 +1,20 @@
 #!/usr/bin/python3
 
+import logging
 import os
+import sys
 import docker
 
 thisImage = 'bfincher/dynamic-dns'
 
+logging.root.setLevel(logging.INFO)
+logger = logging.getLogger('docker_monitor')
+logger.addHandler(logging.StreamHandler(stream=sys.stdout))
+
 
 class Container:
-    def __init__(self, containerId, virtualAlias, hostName, virtualHost, virtualPort): #pylint: disable=too-many-arguments
+
+    def __init__(self, containerId, virtualAlias, hostName, virtualHost, virtualPort):  # pylint: disable=too-many-arguments
         self.containerId = containerId
         self.virtualAlias = virtualAlias
         self.hostName = hostName
@@ -15,13 +22,14 @@ class Container:
         self.virtualPort = virtualPort
 
     def __eq__(self, obj):
-        return self.containerId == obj.containerId
+        return (self.containerId == obj.containerId and
+            self.virtualAlias == obj.virtualAlias and
+            self.hostName == obj.hostName and
+            self.virtualHost == obj.virtualHost and
+            self.virtualPort == obj.virtualPort)
 
     def __str__(self):
         return "containerId = " + self.containerId[:10]
-
-    def __unicode__(self):
-        return self.__str__()
 
     @classmethod
     def fromConfig(cls, containerConfig):
@@ -40,15 +48,15 @@ class Container:
         virtualAlias = _getVirtualAlias(envVars)
 
         if not virtualAlias:
-            print(f"Container {containerConfig.id} has no virtual alias")
+            logger.info("Container %s has no virtual alias", containerConfig.id)
             return None
 
         if not virtualHost:
-            print(f"Container {containerConfig.id} has no virtual host")
+            logger.info("Container %s has no virtual host", containerConfig.id)
             return None
 
         if not virtualPort:
-            print(f"Container {containerConfig.id} has no virtual port")
+            logger.info("Container %s has no virtual port", containerConfig.id)
             return None
 
         return Container(containerConfig.id, virtualAlias, config['Hostname'], virtualHost, virtualPort)
@@ -60,6 +68,7 @@ def _getVirtualHost(envVars):
             return envVar.partition('=')[2]
 
     return None
+
 
 def _getVirtualPort(envVars, containerConfig):
     for envVar in envVars:
@@ -74,6 +83,7 @@ def _getVirtualPort(envVars, containerConfig):
             return value[0]['HostPort']
 
     return None
+
 
 def _getVirtualAlias(envVars):
     for envVar in envVars:
@@ -92,6 +102,11 @@ class DynamicDns:
 
     def __init__(self):
         self.containers = {}
+        self.client = None
+        self._initDockerClient()
+
+    # in a separate method for testing purposes
+    def _initDockerClient(self):
         self.client = docker.DockerClient(base_url='unix://var/run/docker.sock')
 
     def getContainers(self):
@@ -102,13 +117,13 @@ class DynamicDns:
                 self.containers[container.containerId] = container
 
         for key, value in self.containers.items():
-            print(f'{key} -> {value}')
+            logger.info('%s -> %s', key, value)
 
         self.genHostsFile()
 
     def genHostsFile(self):
         hostsDir = os.environ['HOSTS_DIR']
-        print("Generating new hosts file")
+        logger.info("Generating new hosts file")
 
         with open(os.path.join(hostsDir, 'hosts'), 'w', encoding='utf8') as f:
             for container in self.containers.values():
@@ -123,11 +138,10 @@ class DynamicDns:
                 elif status in DynamicDns.stopEventNames:
                     self.processStopEvent(event)
 
-
     def processStopEvent(self, event):
         containerId = event.get('id')
         if self.containers.pop(containerId, None):
-            print(f"Generating new config due to removal of container {containerId}")
+            logger.info("Generating new config due to removal of container %s", containerId)
             self.genHostsFile()
 
     def processStartEvent(self, event):
@@ -138,7 +152,7 @@ class DynamicDns:
             genNewConfig = False
             oldContainer = self.containers.get(containerId)
             self.containers[containerId] = container
-            print(f'adding {containerId} to containers')
+            logger.info('adding %s to containers', containerId)
             if oldContainer:
                 if oldContainer != container:
                     genNewConfig = True
@@ -148,7 +162,7 @@ class DynamicDns:
             if genNewConfig:
                 self.genHostsFile()
 
-            print(f"{container} started.  Image name = {containerConfig.image}")
+            logger.info("%s started.  Image name = %s", container, containerConfig.image)
 
 
 if __name__ == '__main__':
