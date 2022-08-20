@@ -7,6 +7,7 @@ import logging
 import os
 from shutil import rmtree
 import unittest
+import docker_monitor
 from docker_monitor import Container, DynamicDns, thisImage
 
 logging.getLogger("docker_monitor").setLevel(logging.CRITICAL)
@@ -55,6 +56,7 @@ class ContainerTest(unittest.TestCase):
         self.testContainerConfig = None
 
     def setUp(self):
+        docker_monitor.rootDir = "../"
         self.testContainerConfig = TestContainerConfig.create("testId",
                                                               "running",
                                                               "TEST_VIRTUAL_HOST",
